@@ -35,14 +35,37 @@ function scopeMatchesFile(scopes, file) {
   });
 }
 
-export function classifyBySpecTable(obsState, tablePath = join(ENGINE_REPO, 'tools', 'classification.json')) {
-  const res = readJsonStrict(tablePath);
-  if (!res.ok || !res.value || !Array.isArray(res.value.rows)) {
-    return { error: 'classification.json 不可读或损坏' };
+const DEFAULT_CLASSIFICATION_ROWS = [
+  { order: 1, subclass: 'A4', label: '待重验', counts: false, when: { run: 'pass', pendingRecheck: true } },
+  { order: 2, subclass: 'A1', label: '算数', counts: true, when: { run: 'pass', pendingRecheck: false, teeth: ['killed'] } },
+  {
+    order: 3,
+    subclass: 'A2',
+    label: '无牙',
+    counts: false,
+    when: {
+      run: 'pass',
+      pendingRecheck: false,
+      teeth: ['survived', 'no-coverage', 'compile-error', 'runtime-error', 'timeout', 'red-wrong-assertion', 'hollow-assertion']
+    }
+  },
+  { order: 4, subclass: 'A3', label: '未做实验', counts: false, when: { run: 'pass', pendingRecheck: false, teeth: null } }
+];
+
+export function classifyBySpecTable(obsState, tablePath) {
+  const defaultPath = join(ENGINE_REPO, 'tools', 'classification.json');
+  const targetPath = tablePath !== undefined ? tablePath : defaultPath;
+  let rows = DEFAULT_CLASSIFICATION_ROWS;
+  if (tablePath !== undefined || existsSync(targetPath)) {
+    const res = readJsonStrict(targetPath);
+    if (!res.ok || !res.value || !Array.isArray(res.value.rows)) {
+      return { error: 'classification.json 不可读或损坏' };
+    }
+    rows = res.value.rows;
   }
   if (obsState.teeth === 'ignored') return { subclass: null, label: '已忽略', counts: false };
   if (obsState.run !== 'pass') return { subclass: null, label: obsState.run === 'fail' ? '未通过' : '无法判断', counts: false };
-  for (const row of res.value.rows) {
+  for (const row of rows) {
     const w = row.when || {};
     if (w.run !== obsState.run) continue;
     if (w.pendingRecheck !== !!obsState.pendingRecheck) continue;

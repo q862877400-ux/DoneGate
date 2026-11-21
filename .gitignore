@@ -6,8 +6,9 @@ Desktop.ini
 *.tmp
 ~$*
 
-# 技能版部署副本（由 skill/install-skills.mjs 生成，源在 node-contract*/）
-.dsh/skills/
+# 技能与 DSH 本地运行态副本（由 install-skills.mjs / dsh-fixtures.mjs 生成）
+.dsh/
+.githooks/
 
 # arch-grower 的状态目录（graph.json / 看板 / shadow git，不进版本库）
 .arch/
@@ -48,3 +49,4 @@ coverage/
 .donegate/workbench-state.json
 .donegate/quarantine/
 .donegate/scratch/
+.donegate/dsh-bundle/

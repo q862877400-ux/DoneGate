@@ -14,18 +14,29 @@
 //   node skill/install-hooks.mjs --red-self-test       在临时 git 仓实测：脏/作弊 commit 被 git 真拦截，干净 commit 放行
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve, win32 } from 'node:path';
+import path, { dirname, join, resolve, win32 } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const DG_ROOT = resolve(HERE, '..');
 
-export function buildPreCommitScript(projectRoot) {
-  const sameSkillDir = resolve(projectRoot, 'skill') === resolve(DG_ROOT, 'skill');
-  const skillPrefix = sameSkillDir
-    ? 'skill'
-    : join(DG_ROOT, 'skill').replace(/\\/g, '/');
+export function resolveSkillPrefix(projectRoot, dgRoot = DG_ROOT, pathApi = path) {
+  const normProject = pathApi.resolve(projectRoot);
+  const normDg = pathApi.resolve(dgRoot);
+  const dgSkill = pathApi.join(normDg, 'skill');
+  const isWin = pathApi.sep === '\\';
+  const sameRoot = isWin
+    ? normProject.toLowerCase() === normDg.toLowerCase()
+    : normProject === normDg;
+  if (sameRoot) return 'skill';
+  // 任何外部项目（含 Windows 跨盘符如 C: 临时目录指向 D: DoneGate 仓，以及 DoneGate 的父目录）
+  // 一律写入绝对正斜杠路径，杜绝跨盘符误退化或大小写差异导致本仓误写本机绝对路径。
+  return dgSkill.replace(/\\/g, '/');
+}
+
+export function buildPreCommitScript(projectRoot, dgRoot = DG_ROOT, pathApi = path) {
+  const skillPrefix = resolveSkillPrefix(projectRoot, dgRoot, pathApi);
 
   return [
     '#!/bin/sh',
@@ -33,7 +44,7 @@ export function buildPreCommitScript(projectRoot) {
     'set -e',
     `DG_SKILL="${skillPrefix}"`,
     'node "$DG_SKILL/check-commit-hygiene.mjs" --staged --root .',
-    'if [ -f "skill/check-escapes.mjs" ] && [ -f "tools/verify-spec.mjs" ]; then',
+    'if [ -f "skill/check-escapes.mjs" ] && [ -f "escapes.jsonl" ]; then',
     '  node "skill/check-escapes.mjs" --self-check --project .',
     'elif [ -f "INTENT.md" ]; then',
     '  node "$DG_SKILL/check-escapes.mjs" --project .',
@@ -75,8 +86,18 @@ function runRedSelfTest() {
     spawnSync('git', ['-C', tmp, 'add', '.']);
     spawnSync('git', ['-C', tmp, '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'init']);
 
-    const crossDriveHook = buildPreCommitScript(win32.join('C:', 'Temp', 'dg-hook-x'));
-    check('Windows 跨盘符或外部临时仓不误退化为相对 skill 路径', !crossDriveHook.includes('DG_SKILL="skill"'));
+    const mockWinDg = win32.join('D:', 'skills', 'DoneGate');
+    const expectedWinSkill = win32.join(mockWinDg, 'skill').replace(/\\/g, '/');
+    const crossDriveHook = buildPreCommitScript(win32.join('C:', 'Temp', 'dg-hook-x'), mockWinDg, win32);
+    const parentDrivePrefix = resolveSkillPrefix(win32.join('D:'), mockWinDg, win32);
+    const winCaseDiffSelf = resolveSkillPrefix(win32.join('d:', 'skills', 'donegate'), mockWinDg, win32);
+    check(
+      'Windows 跨盘符/父目录写绝对正斜杠路径且本仓盘符大小写差异仍用相对 skill',
+      crossDriveHook.includes(`DG_SKILL="${expectedWinSkill}"`) &&
+        parentDrivePrefix === expectedWinSkill &&
+        winCaseDiffSelf === 'skill' &&
+        crossDriveHook.includes('[ -f "escapes.jsonl" ]')
+    );
     const inst = installGitHooks(tmp);
     check('安装 .githooks/pre-commit 并激活 git core.hooksPath', inst.activated && existsSync(inst.hookPath));
 
